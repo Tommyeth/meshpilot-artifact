@@ -1,0 +1,21 @@
+{
+  "artifact_schema_version": 2,
+  "objective_scale_version": "meshpilot-ms-equivalent-v2",
+  "seeds": [7, 11, 19, 23, 31],
+  "nodes": 12,
+  "tasks_per_seed": 24,
+  "scenarios": [
+    "stable",
+    "bandwidth_drop",
+    "node_failure",
+    "gpu_pressure",
+    "memory_pressure"
+  ],
+  "top_k": 16,
+  "control_interval_ms": 1000.0,
+  "injected_invalid_rate": 0.15,
+  "deadline_scale": 1.5,
+  "agent_backend": "vertex",
+  "model": "gemini-3.5-flash-lite",
+  "llm_timeout_s": 30.0
+}

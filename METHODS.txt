@@ -1,0 +1,159 @@
+MeshPilot reproduction methods
+
+1. Data and configuration
+
+configs/primary.json records seeds 7,11,19,23,31; 12 workers; 24 tasks per seed;
+five scenarios (stable, bandwidth_drop, node_failure, gpu_pressure,
+memory_pressure); top_k=16; control interval 1000 ms; deadline_scale=1.5;
+injected_invalid_rate=0.15; model gemini-3.5-flash-lite; timeout 30 s.
+The recorded model settings are temperature=0 and thinking_budget=0.
+
+data/decisions.csv.gz contains 600 direct and 600 profile-compiled observations.
+Every retained row includes the original task, candidates and snapshot fields.
+One hundred direct IDs were replaced by the test wrapper; the selection
+comparison excludes these cases and uses 500 known-ID pairs. The injection
+parameter is a generator setting; the observed exclusion count is 100.
+The pairing key is (seed, scenario, task_id).
+
+The 100 author-written English/Chinese phrases are evenly labeled across four
+profiles. The 120 task IDs each recur in five scenarios. Eighty phrases occur
+five times and twenty occur ten times, so 600 decisions are not 600 distinct
+user requests. meshpilot/intent_benchmark.py contains the phrases and mapping.
+meshpilot/protocol.py contains the released prompt, output schema and model
+payload construction. The payload contains operator_intent, typed requirements
+and candidate metrics; evaluation_profile is used for offline scoring.
+The recorded prompt version is meshpilot-policy-v2 and its SHA-256 is
+4003338ead3ddc02b34f886b86c697b3870346f1c9d98746dfe450993a58efcb.
+Parsed responses are retained; raw provider HTTP traffic is unavailable.
+The author-written evaluation set and available records do not establish an
+independent development/evaluation split or reconstruct prior prompt tuning.
+
+2. Candidate scoring and resource allocation
+
+For worker n:
+  compute_ms = task.estimated_compute_ms / max(n.compute_speed, 1e-9)
+  queue_ms = compute_ms * 0.15 * n.active_tasks
+  B = (input_mib + output_mib) * 8.388608  [megabits]
+  A = link.reservable_mbps
+  desired = max(task.min_bandwidth_mbps, min(50, A))
+If a deadline is specified and gives positive
+  remaining_s = (deadline_ms - compute_ms - queue_ms - rtt_ms) / 1000,
+set desired = max(desired, B / remaining_s). The admitted application rate is
+rho = min(desired, A).
+
+  network_ms = rtt_ms + 2*jitter_ms + (B/max(rho,1e-9))*1000
+               * min(1/max(1-loss_rate,0.01),5)
+  T = compute_ms + queue_ms + network_ms
+  C = (T/3600000)*(cpu_cores*price_per_cpu_hour + gpu_units*price_per_gpu_hour)
+      + (output_mib/1024)*price_per_gb_egress
+The egress calculation uses a GiB-style conversion despite the field name.
+  freshness = min(telemetry_age_s/120, 1)
+  network_risk = min(1, 3*loss_rate + jitter_ms/100)
+  F = min(1, 0.55*node.failure_probability + 0.25*freshness + 0.20*network_risk)
+G is the maximum post-placement allocated/capacity share across CPU, RAM, GPU
+and VRAM; GPU and VRAM terms are omitted when capacity is zero. Compute
+allocations equal the task's typed CPU/RAM/GPU/VRAM requirements.
+
+  J = w_T*T + w_C*5000000*C + w_F*20000*F + w_G*1000*G
+Weights (w_T, w_C, w_F, w_G):
+  balanced   (1.00, 0.20, 0.50, 0.10)
+  latency    (1.80, 0.05, 0.35, 0.05)
+  cost       (0.35, 2.00, 0.30, 0.10)
+  resilience (0.70, 0.10, 2.00, 0.10)
+
+Planner filters cover online status, trust, CPU/RAM/GPU/VRAM availability,
+link presence, loss, telemetry age <=120 s, minimum reservable rate, hard
+deadline and budget. See meshpilot/planner.py and meshpilot/verifier.py.
+Profiles share the same hard constraints. Candidate ties use balanced score
+and worker ID; recorded candidate order is preserved when replaying selection.
+
+3. Paired comparison, control and uncertainty
+
+For the author-declared profile w, the reference p* minimizes J_w over the
+recorded post-disruption feasible set. All reference scores are positive.
+  regret(p) = (J_w(p) - J_w(p*)) / J_w(p*)
+The direct arm uses the recorded model plan ID. The compiled arm minimizes
+the recorded inferred profile's objective. The fixed-balanced control minimizes
+the balanced objective on the same feasible set. Matching the declared profile
+gives zero compiled regret by construction. This metric measures objective
+consistency rather than realized latency or independent user satisfaction.
+
+meshpilot/paired_analysis.py computes the decision-level mean across the 500
+known-ID pairs. The exploratory seed-cluster bootstrap uses seed 20260829 and
+5000 draws. Each draw samples five complete seed clusters with replacement and
+divides the sum of all sampled paired differences by the total sampled decision
+count. Cluster order is string-sorted (11,19,23,31,7); percentile indices are
+floor(0.025*(draws-1)) and floor(0.975*(draws-1)).
+The mean reduction is 7.1755209725 percentage points and its interval is
+[2.1083529873,13.2556823557] percentage points. Five clusters limit precision.
+
+meshpilot/profile_analysis.py recomputes the post-hoc fixed-balanced control,
+profile errors, ties and failure examples. Fixed-balanced mean regret is
+4.6805218668%; compiled mean regret is 0.0866532262%; compiled wins/ties/losses
+against balanced are 124/374/2. All five compiled losses against direct choices
+involve profile errors. The example is the first lexicographic
+(seed,scenario,task_id) compiled loss with a profile error:
+(11,gpu_pressure,task-11-007), phrase resilience-15. The author label is
+resilience and the inferred profile is balanced; direct chooses node-09 with
+zero regret, while compiled/balanced choose node-00 with 3.2691441055% regret.
+All 397 paired ties select the same node within each pair; 396 have zero regret
+in both arms. The script writes all decisions and all five losses.
+
+4. Profile bounds, fault rejection and concurrent admission
+
+meshpilot/authority_bound.py enumerates all four profile choices on each of
+600 feasible sets. The maximum regret over these choices is bounded by the
+maximum over the full feasible set. Among 500 known-ID direct choices, 36 exceed
+their decision's profile bound. The bound assumes the configured objective and
+a correct selector; it is instance-specific modeled objective loss.
+
+meshpilot/verifier_causal_analysis.py evaluates 100 valid controls, 100 invalid
+proposals for each of 16 fault types, and 100 concurrent-admission trials.
+The verifier-off arm records attempted actions without dispatching work.
+Expected rejection/fallback/abstention counts are 1600/1468/132. Overlapping
+snapshot-version failures make this a test of combined rejection coverage.
+The concurrency trials pit two requests of three CPU cores and 60 Mb/s each
+against four cores and 80 Mb/s. The locked ledger admits one per trial, with
+zero overcommit; independent prechecks overcommit in all 100 trials.
+meshpilot/reservation.py contains the lock/check/reserve/release implementation.
+
+The controller accepts a supplied execution-state snapshot; automatic telemetry
+refresh across model calls is outside these experiments. Admission is local to
+one controller process. Bandwidth accounting and application pacing do not
+install routes or reserve shared-link QoS.
+
+5. Physical observations
+
+data/physical/requests.csv records 96 executions, 24 per policy. cases.json
+contains workload parameters, snapshot.json contains placement inputs, and
+workers.json records worker capacities and software. The campaign shuffle seed
+is 20260830. verify.py recomputes completion counts and mean end-to-end times:
+round_robin 23.832 s, network_greedy 4.531 s, joint_fixed 5.168 s,
+vertex_intent_compiled 4.766 s. The three adaptive policies selected the same
+Docker worker, so these times do not establish a placement advantage.
+failures.csv records 12 recovery trials, all successful: three each for offline
+state, reduced path capacity, stale telemetry and unreachable transport.
+
+The worker inventory records docker-cpu with 40 effective CPUs and 214748364800
+bytes of memory; ovh-cpu with 16 and 33548660736 bytes; and gcp-sg/gcp-us each
+with 2 and 8336867328 bytes. Live endpoints, credentials and transfer payloads
+are not included. Logged payload hashes cannot be checked against the original
+bytes. Endpoint addresses in three transport-error strings are redacted; the
+numeric observations and outcomes are retained. These records support numerical
+replay; a live replication requires worker configuration and regenerated data.
+
+6. Scaling replay
+
+data/scaling.csv.gz has 600 observations at each of 12,50,100,200,500,1000
+workers. Mean uses the arithmetic mean; p99 uses numpy.quantile(q=.99) with
+linear interpolation. The recorded environment is Python 3.13.7 on
+macOS-26.6-arm64-arm-64bit-Mach-O; CPU model and physical RAM were not recorded.
+At 1000 workers, planner mean/p99 are 21.38/30.23 ms and verifier mean is 0.07 ms.
+
+meshpilot/scale_replay.py regenerates tasks, snapshots and complete feasible
+sets with the offline backend, reuses the 600 recorded inferred profiles, and
+checks the 12-worker reconstruction against recorded candidates. The supplied
+config describes the original model campaign; replay selects the keyword
+backend internally. New timing measurements depend on the local machine.
+They cover deterministic computation, excluding model inference, distributed
+telemetry collection and physical execution.

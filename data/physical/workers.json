@@ -1,0 +1,46 @@
+{
+  "docker-cpu": {
+    "cpu_effective": 40.0,
+    "gpu_inventory": [],
+    "memory_available_bytes": 212891828224,
+    "memory_effective_bytes": 214748364800,
+    "node": "docker-cpu",
+    "observed_at": "2026-08-30T06:06:44.842475+00:00",
+    "platform": "Linux-5.15.0-161-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "schema_version": 1
+  },
+  "gcp-sg": {
+    "cpu_effective": 2.0,
+    "gpu_inventory": [],
+    "memory_available_bytes": 7839006720,
+    "memory_effective_bytes": 8336867328,
+    "node": "gcp-sg",
+    "observed_at": "2026-08-30T06:00:44.360078+00:00",
+    "platform": "Linux-6.1.0-52-cloud-amd64-x86_64-with-glibc2.36",
+    "python": "3.11.2",
+    "schema_version": 1
+  },
+  "gcp-us": {
+    "cpu_effective": 2.0,
+    "gpu_inventory": [],
+    "memory_available_bytes": 7830335488,
+    "memory_effective_bytes": 8336867328,
+    "node": "gcp-us",
+    "observed_at": "2026-08-30T06:00:18.775739+00:00",
+    "platform": "Linux-6.1.0-52-cloud-amd64-x86_64-with-glibc2.36",
+    "python": "3.11.2",
+    "schema_version": 1
+  },
+  "ovh-cpu": {
+    "cpu_effective": 16.0,
+    "gpu_inventory": [],
+    "memory_available_bytes": 22083289088,
+    "memory_effective_bytes": 33548660736,
+    "node": "ovh-cpu",
+    "observed_at": "2026-08-30T06:06:47.914684+00:00",
+    "platform": "Linux-6.12.94+deb13-amd64-x86_64-with-glibc2.41",
+    "python": "3.13.5",
+    "schema_version": 1
+  }
+}
